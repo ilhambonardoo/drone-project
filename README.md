@@ -1,178 +1,345 @@
-# Drone NDVI Camera
+# Drone Camera — Dashboard Analisis Citra MAPIR
 
-Aplikasi Next.js untuk simulasi kamera drone menggunakan webcam komputer. Snapshot dari webcam dikirim ke service FastAPI untuk diproses menjadi analisis NDVI, lalu hasilnya ditampilkan sebagai nilai NDVI RAW, NDVI AI, klasifikasi kesehatan tanaman, dan tiga gambar hasil: NDVI, RG, serta RGR.
+Dashboard Next.js untuk memperoleh citra dari kamera multispektral MAPIR Survey3 melalui API DreamPalm, menjalankan inferensi NDVI/CNN melalui FastAPI, lalu menampilkan hasil klasifikasi, nilai NDVI, kanal spektral, dan citra hasil.
 
-> Status saat ini: frontend belum menginisialisasi client Supabase dan belum melakukan upload ke Supabase secara langsung. Frontend hanya memanggil FastAPI. Supabase perlu digunakan oleh backend atau ditambahkan ke alur upload terlebih dahulu. Konfigurasi Next.js sudah mengizinkan gambar public dari bucket `snapshots` pada project Supabase yang sekarang.
+## Ringkasan Fitur
+
+- Live preview kamera melalui iframe stream MAPIR.
+- Pemeriksaan status kesiapan kamera dan busy capture setiap 5 detik.
+- Pemicu capture melalui Next.js API route.
+- Polling status capture hingga selesai atau gagal.
+- Pengiriman gambar JPG hasil capture ke layanan FastAPI.
+- Tampilan klasifikasi **Sehat** atau **Terserang** beserta skor CNN.
+- Tampilan nilai NDVI, kanal Green/Red/NIR, dan persentase piksel valid.
+- Preview foto capture, heatmap NDVI, serta tautan unduh JPG dan RAW asli.
+- Guardrail visual untuk mode radiometrik sementara dan penyemprotan otomatis.
+
+## Arsitektur
+
+```text
+Browser
+  |  GET /api/mapir/health
+  |  POST /api/mapir/capture
+  |  GET /api/mapir/status/:captureId
+  v
+Next.js Server Routes
+  |  X-DreamPalm-Key
+  v
+DreamPalm MAPIR API
+  |  status, JPG, RAW
+  v
+Next.js Status Route
+  |  multipart/form-data file=<capture-id>.jpg
+  v
+FastAPI ML API (/process-snapshot)
+  |  hasil klasifikasi dan nilai spektral
+  v
+Dashboard
+```
+
+## Teknologi
+
+- Next.js 16 dengan App Router
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- FastAPI sebagai backend inferensi
+- DreamPalm/Capture API untuk kamera MAPIR
+- Supabase Storage untuk hosting citra hasil
+
+## Struktur Project
+
+```text
+src/
+├── app/
+│   ├── page.tsx
+│   ├── layout.tsx
+│   ├── globals.css
+│   └── api/mapir/
+│       ├── health/route.ts
+│       ├── capture/route.ts
+│       └── status/[captureId]/route.ts
+├── components/
+│   ├── CameraPreview.tsx
+│   └── PredictionCard.tsx
+├── lib/
+│   └── errors.ts
+└── types/
+    └── index.ts
+
+next.config.ts
+env.example
+```
 
 ## Prasyarat
 
 - Node.js 20 atau lebih baru
 - npm
-- Service FastAPI untuk endpoint pemrosesan snapshot
-- Browser dengan akses webcam
-- Project Supabase jika backend menyimpan hasil gambar ke Storage
+- DreamPalm Capture API yang aktif
+- Kamera MAPIR Survey3 yang terhubung dengan sistem DreamPalm
+- Service FastAPI dengan endpoint `POST /process-snapshot`
+- Akses ke URL stream kamera
+- URL Supabase Storage bila hasil inferensi menampilkan gambar dari bucket
 
-## Menjalankan frontend
+## Instalasi
 
-Install dependency:
+1. Install dependency:
 
-```bash
-npm install
-```
-
-Buat file `.env.local` di root project:
-
-```env
-NEXT_PUBLIC_FASTAPI_URL=http://127.0.0.1:8000
-```
-
-Jalankan development server:
-
-```bash
-npm run dev
-```
-
-Buka [http://localhost:3000](http://localhost:3000). Akses webcam perlu diizinkan oleh browser. Untuk deployment, gunakan URL HTTPS karena sebagian besar browser hanya mengizinkan webcam dari HTTPS atau `localhost`.
-
-## Environment variable
-
-| Variable                  | Wajib | Dipakai oleh | Keterangan                                             |
-| ------------------------- | ----- | ------------ | ------------------------------------------------------ |
-| `NEXT_PUBLIC_FASTAPI_URL` | Tidak | Frontend     | Base URL FastAPI. Default-nya `http://127.0.0.1:8000`. |
-
-Contoh untuk backend lokal:
-
-```env
-NEXT_PUBLIC_FASTAPI_URL=http://127.0.0.1:8000
-```
-
-`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, dan `SUPABASE_SERVICE_ROLE_KEY` belum dibaca oleh source frontend saat ini. Jangan menaruh service role key di `.env.local` frontend atau variable yang diawali `NEXT_PUBLIC_`; service role key hanya boleh berada di backend.
-
-## Setup Supabase Storage
-
-Bagian ini diperlukan apabila FastAPI menyimpan gambar hasil ke Supabase Storage dan mengembalikan URL public-nya ke frontend.
-
-1. Buat project di [Supabase Dashboard](https://supabase.com/dashboard).
-2. Buka **Storage** lalu buat bucket bernama `snapshots`.
-3. Jadikan bucket public jika response FastAPI mengembalikan URL seperti:
-   `https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/<file>`.
-4. Di environment backend, isi kredensial Supabase. Nama variable bisa mengikuti library backend yang digunakan, misalnya:
-
-   ```env
-   SUPABASE_URL=https://<project-ref>.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
-   SUPABASE_BUCKET=snapshots
+   ```bash
+   npm install
    ```
 
-5. Jangan commit file env atau service role key. Gunakan `.env.local` untuk frontend dan env secret dari platform deployment untuk backend.
+2. Buat `.env.local` berdasarkan `env.example`:
 
-`next.config.ts` membaca hostname Supabase dari `SUPABASE_STORAGE_URL` pada `.env`. Ganti nilai tersebut jika memakai project Supabase lain, lalu restart server Next.js agar konfigurasi diperbarui.
+   ```bash
+   cp env.example .env.local
+   ```
 
-### Kontrak endpoint FastAPI
+3. Isi environment variable yang diperlukan.
 
-Frontend mengirim request berikut:
+4. Jalankan development server:
 
-```http
-POST {NEXT_PUBLIC_FASTAPI_URL}/process-snapshot
-Content-Type: multipart/form-data
+   ```bash
+   npm run dev
+   ```
+
+5. Buka `http://localhost:3000`.
+
+## Environment Variable
+
+| Variable | Scope | Wajib | Fungsi |
+| --- | --- | --- | --- |
+| `NEXT_PUBLIC_MAPIR_STREAM_URL` | Browser | Tidak | URL iframe live preview MAPIR. Default: `https://stream.dreampalm.id/dreampalm/` |
+| `DREAMPALM_API_URL` | Server | Ya | Base URL DreamPalm Capture API |
+| `DREAMPALM_API_KEY` | Server | Ya | API key yang dikirim sebagai header `X-DreamPalm-Key` |
+| `FASTAPI_URL` | Server | Tidak | Base URL FastAPI. Default: `http://127.0.0.1:8000` |
+| `SUPABASE_STORAGE_URL` | Server/build | Tidak | Base URL Supabase untuk mengizinkan remote image Next.js |
+
+Contoh konfigurasi:
+
+```env
+NEXT_PUBLIC_MAPIR_STREAM_URL=https://stream.dreampalm.id/dreampalm/
+DREAMPALM_API_URL=https://api.dreampalm.id
+DREAMPALM_API_KEY=<dream-palm-api-key>
+FASTAPI_URL=http://127.0.0.1:8000
+SUPABASE_STORAGE_URL=https://<project-ref>.supabase.co
 ```
 
-Field file yang dikirim bernama `file`. Response sukses diharapkan berbentuk JSON:
+> Jangan menaruh API key atau credential rahasia pada variable yang diawali `NEXT_PUBLIC_`. `DREAMPALM_API_KEY` hanya dibaca oleh Next.js server route.
+
+Restart development server setelah mengubah environment variable.
+
+## Kontrak API Internal
+
+### Health
+
+```http
+GET /api/mapir/health
+```
+
+Merequest `{DREAMPALM_API_URL}/health` ke DreamPalm API. Contoh response:
 
 ```json
 {
-  "success": true,
-  "ndviRAW": 0.72,
-  "ndviAI": 0.81,
-  "classification": "sehat",
-  "snapshotNDVI": "https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/ndvi.png",
-  "snapshotRG": "https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/rg.png",
-  "snapshotRGR": "https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/rgr.png"
+  "drone_id": "drone-01",
+  "raspberry_pi": "online",
+  "mapir": {
+    "ready": true,
+    "ip": "192.168.1.100"
+  },
+  "capture_busy": false
 }
 ```
 
-Nilai `classification` yang didukung frontend adalah `sehat` dan `tidak_sehat`. Untuk response error, frontend mencoba membaca field `detail`.
+### Mulai Capture
 
-## Alur aplikasi
-
-1. `CameraPreview` meminta akses webcam melalui `navigator.mediaDevices.getUserMedia`.
-2. Tombol snapshot mengambil frame video dan mengubahnya menjadi file PNG.
-3. `ndiviService` mengirim file ke FastAPI pada endpoint `/process-snapshot`.
-4. `PredictionCard` menampilkan nilai, klasifikasi, dan gambar hasil dari response API.
-
-## Struktur penting
-
-```text
-src/
-	app/page.tsx                    Halaman utama dan state proses
-	app/api/process-ndvi/route.ts  Route API Next.js, saat ini belum diimplementasikan
-	components/CameraPreview.tsx    Akses webcam dan pembuatan snapshot
-	components/PredictionCard.tsx   Tampilan hasil analisis
-	services/ndiviService.ts        Client HTTP ke FastAPI
-	types/index.ts                  Tipe response NDVI
-next.config.ts                    Konfigurasi remote image Supabase
+```http
+POST /api/mapir/capture
 ```
 
-## Script tersedia
+Merequest `POST {DREAMPALM_API_URL}/captures` dengan header:
+
+```http
+X-DreamPalm-Key: <DREAMPALM_API_KEY>
+```
+
+Response upstream perlu menyediakan `capture_id`.
+
+### Status Capture
+
+```http
+GET /api/mapir/status/<captureId>
+```
+
+Frontend melakukan polling route ini setiap 1.5 detik. Saat status belum selesai, response berasal langsung dari upstream. Saat status `completed`, route mengunduh file JPG dari URL upstream, mengirimnya ke FastAPI sebagai multipart field `file`, lalu mengembalikan:
+
+```json
+{
+  "status": "completed",
+  "capture_id": "capture-123",
+  "originalJpgUrl": "https://api.dreampalm.id/v1/mapir/captures/capture-123.jpg",
+  "originalRawUrl": "https://api.dreampalm.id/v1/mapir/captures/capture-123.raw",
+  "mlResult": {
+    "success": true,
+    "filename": "capture-123.jpg",
+    "modelName": "DreamPalm-NDVI-CNN",
+    "modelStatus": "active",
+    "classification": "Sehat",
+    "classIndex": 0,
+    "scoreTerserang": 0.12,
+    "scoreSehat": 0.88,
+    "predictionScore": 0.88,
+    "scoreCalibrated": true,
+    "threshold": 0.5,
+    "ndvi": 0.65,
+    "bands": {
+      "green": 0.31,
+      "red": 0.24,
+      "nir": 0.72
+    },
+    "validPixelPercentage": 98.5,
+    "inputShape": [224, 224, 3],
+    "snapshotThumbnail": "https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/thumbnail.jpg",
+    "snapshotNDVI": "https://<project-ref>.supabase.co/storage/v1/object/public/snapshots/ndvi.png",
+    "radiometricMode": "jpg",
+    "radiometricValidated": false,
+    "physicalCoverageTargetMeters": 0,
+    "physicalCoverageValidated": false,
+    "automaticSprayingAllowed": false
+  }
+}
+```
+
+Nilai `classification` yang didukung UI adalah `Sehat` dan `Terserang`.
+
+## Kontrak FastAPI
+
+Request yang dibuat route status:
+
+```http
+POST <FASTAPI_URL>/process-snapshot
+Content-Type: multipart/form-data
+```
+
+Field:
+
+```text
+file=<file JPG hasil capture>
+```
+
+FastAPI harus mengembalikan objek JSON yang sesuai dengan tipe `NDVIPredictionResult`, terutama:
+
+- `success`
+- `filename`
+- `modelName`
+- `modelStatus`
+- `classification`
+- `scoreSehat`
+- `scoreTerserang`
+- `predictionScore`
+- `threshold`
+- `ndvi`
+- `bands.green`, `bands.red`, `bands.nir`
+- `validPixelPercentage`
+- `snapshotThumbnail`
+- `snapshotNDVI`
+- flag radiometrik dan penyemprotan
+
+## Alur Penggunaan
+
+1. Dashboard memanggil `/api/mapir/health` dan menandai kamera siap bila MAPIR ready dan tidak sedang capture.
+2. Pengguna menekan **Ambil Foto & Analisis**.
+3. Browser memanggil `/api/mapir/capture`.
+4. Next.js meneruskan request ke DreamPalm API dengan API key.
+5. Browser menerima `capture_id`, lalu polling `/api/mapir/status/<captureId>` setiap 1.5 detik.
+6. Jika selesai, Next.js mengambil JPG, mengirimnya ke FastAPI, dan mengembalikan hasil ML.
+7. Dashboard menampilkan prediksi CNN, NDVI, kanal spektral, thumbnail, dan heatmap.
+
+## Konfigurasi Gambar Next.js
+
+`next.config.ts` mengizinkan gambar remote dari:
+
+- host yang ditentukan `DREAMPALM_API_URL` pada pola `/v1/mapir/captures/**`
+- host yang ditentukan `SUPABASE_STORAGE_URL` pada pola `/storage/v1/object/public/snapshots/**`
+
+Pastikan URL upstream dan gambar Supabase menggunakan HTTPS serta berada dalam pola yang terdaftar. Restart Next.js setelah mengganti `SUPABASE_STORAGE_URL` atau `DREAMPALM_API_URL`.
+
+## Script Project
 
 ```bash
 npm run dev      # Development server
-npm run build    # Build production
-npm run start    # Menjalankan hasil build
-npm run lint     # Pemeriksaan ESLint
+npm run build    # Production build
+npm run start    # Menjalankan production build
+npm run lint     # Menjalankan ESLint
 ```
 
-Sebelum membuat pull request atau deployment, jalankan:
+## Verifikasi Sebelum Deployment
 
 ```bash
 npm run lint
 npm run build
+npm run start
 ```
+
+Pastikan service DreamPalm dan FastAPI dapat diakses dari server Next.js, bukan hanya dari browser pengguna.
+
+## Deployment
+
+Gunakan platform yang mendukung Next.js 16 dan App Router. Konfigurasikan environment variable berikut pada platform deployment:
+
+```text
+NEXT_PUBLIC_MAPIR_STREAM_URL
+DREAMPALM_API_URL
+DREAMPALM_API_KEY
+FASTAPI_URL
+SUPABASE_STORAGE_URL
+```
+
+Perluasan yang direkomendasikan untuk produksi:
+
+- Gunakan HTTPS untuk seluruh endpoint.
+- Gunakan secret manager untuk `DREAMPALM_API_KEY`.
+- Tambahkan timeout dan retry terbatas pada polling capture.
+- Batasi ukuran dan tipe file pada FastAPI.
+- Pastikan bucket Supabase public atau tambahkan proxy autentikasi sesuai kebutuhan.
+- Tambahkan autentikasi pengguna sebelum membuka dashboard capture.
 
 ## Troubleshooting
 
-- **Webcam tidak aktif:** izinkan permission kamera dan buka aplikasi melalui `localhost` atau HTTPS.
-- **Request gagal / connection refused:** pastikan FastAPI hidup dan nilai `NEXT_PUBLIC_FASTAPI_URL` benar.
-- **Gambar hasil tidak tampil:** pastikan URL response dapat diakses, bucket `snapshots` public, dan hostname Supabase sudah terdaftar di `next.config.ts`.
-- **Perubahan `.env.local` tidak terbaca:** restart `npm run dev` setelah mengubah environment variable.
+### Status kamera selalu menunggu
+
+- Periksa koneksi ke `{DREAMPALM_API_URL}/health`.
+- Pastikan response DreamPalm menunjukkan `mapir.ready: true`.
+- Pastikan tidak ada capture aktif (`capture_busy: false`).
+
+### Capture gagal dengan 500
+
+- Pastikan `DREAMPALM_API_URL` dan `DREAMPALM_API_KEY` terisi.
+- Pastikan header `X-DreamPalm-Key` sesuai dengan API upstream.
+
+### Capture selesai tetapi hasil ML gagal
+
+- Pastikan FastAPI aktif pada `FASTAPI_URL`.
+- Pastikan endpoint `/process-snapshot` menerima `multipart/form-data`.
+- Pastikan URL JPG dapat diunduh Next.js dan API key upstream valid.
+- Periksa log Next.js untuk detail dari response FastAPI.
+
+### Gambar tidak tampil
+
+- Pastikan `snapshotThumbnail` dan `snapshotNDVI` dapat diakses.
+- Pastikan Supabase Storage public bila URL berasal dari bucket public.
+- Pastikan hostname Supabase terdaftar pada `SUPABASE_STORAGE_URL`.
+- Restart server setelah mengubah konfigurasi Next.js.
+
+### Environment variable tidak terbaca
+
+- Simpan server-only variable di `.env.local`.
+- Jangan gunakan tanda kutip atau karakter newline pada nilai API key.
+- Restart `npm run dev` setelah mengubah `.env.local`.
 
 ## Referensi
 
-- [Next.js Documentation](https://nextjs.org/docs)
-- [Supabase Storage Documentation](https://supabase.com/docs/guides/storage)
-  This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
-
-## Getting Started
-
-First, run the development server:
-
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- [Dokumentasi Next.js](https://nextjs.org/docs)
+- [Dokumentasi React](https://react.dev/)
+- [Dokumentasi Tailwind CSS](https://tailwindcss.com/docs)
+- [Dokumentasi Supabase Storage](https://supabase.com/docs/guides/storage)
