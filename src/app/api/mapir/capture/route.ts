@@ -1,33 +1,49 @@
 import { NextResponse } from "next/server";
-import { getErrorMessage } from "@/src/lib/errors";
+import { insertCapture } from "@/src/lib/captureDb";
+import { query } from "@/src/lib/db";
+import {
+  ApiError,
+  assertSameOrigin,
+  captureMetadata,
+  triggerCapture,
+} from "@/src/lib/mapirClient";
 
-export async function POST() {
-  const apiUrl = process.env.DREAMPALM_API_URL;
-  const apiKey = process.env.DREAMPALM_API_KEY;
-
-  if (!apiUrl || !apiKey) {
-    return NextResponse.json(
-      { detail: "Konfigurasi DREAMPALM_API_URL atau API_KEY belum diatur." },
-      { status: 500 },
-    );
-  }
-
+export async function POST(request: Request) {
   try {
-    const res = await fetch(`${apiUrl}/captures`, {
-      method: "POST",
-      headers: {
-        "X-DreamPalm-Key": apiKey,
-      },
+    assertSameOrigin(request);
+    // Check database readiness before triggering a physical action.
+    await query("SELECT 1 FROM uji.captures LIMIT 1");
+    const data = await triggerCapture();
+    try {
+      await insertCapture({
+        captureId: data.capture_id,
+        ...captureMetadata(data),
+      });
+    } catch {
+      return NextResponse.json(
+        {
+          capture_id: data.capture_id,
+          status: "pending",
+          dbError: true,
+          message:
+            "Capture dipicu, tetapi metadata belum tercatat. Gunakan ID yang sama untuk melanjutkan.",
+        },
+        { status: 207 },
+      );
+    }
+    return NextResponse.json({
+      capture_id: data.capture_id,
+      status: data.status || "pending",
     });
-
-    const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
-  } catch (error: unknown) {
+  } catch (e) {
+    if (e instanceof ApiError)
+      return NextResponse.json(
+        { detail: e.message, code: e.code },
+        { status: e.status },
+      );
     return NextResponse.json(
-      {
-        detail: getErrorMessage(error, "Gagal menghubungi Capture API."),
-      },
-      { status: 502 },
+      { detail: "Database belum siap. Kamera belum dipicu." },
+      { status: 503 },
     );
   }
 }
