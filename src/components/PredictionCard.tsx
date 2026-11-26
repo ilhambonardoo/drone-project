@@ -36,7 +36,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
       return {
         label: "✅ Konsisten sehat",
         description:
-          "Prediksi visual CNN (Sehat) selaras dengan nilai indeks vegetasi NDVI yang berada pada rentang normal.",
+          "Prediksi CNN (Sehat) searah dengan NDVI di atas ambang ilustratif; bukan validasi kesehatan tanaman.",
         style: "bg-green-50 border-green-200 text-green-800",
       };
     }
@@ -44,7 +44,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
       return {
         label: "✅ Konsisten terindikasi",
         description:
-          "Prediksi CNN (Terserang) terkonfirmasi oleh nilai NDVI yang rendah/abnormal.",
+          "Prediksi CNN (Terserang) disertai NDVI di bawah ambang ilustratif. Perlu verifikasi lapangan.",
         style: "bg-red-50 border-red-200 text-red-800",
       };
     }
@@ -76,7 +76,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
           </h2>
           <p className="text-xs text-gray-500">
             Model: {data.modelName} ({data.modelStatus}) • Piksel Valid:{" "}
-            {data.validPixelPercentage.toFixed(1)}%
+            {data.validPixelPercentage === null ? "N/A" : `${data.validPixelPercentage.toFixed(1)}%`}
           </p>
         </div>
 
@@ -140,8 +140,8 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
             {!hasNdvi
               ? "Tidak valid"
               : isNdviNormal
-                ? "Normal (≥ 0.30)"
-                : "Rendah / Abnormal (< 0.30)"}
+                ? "Di atas ambang (≥ 0.30)"
+                : "Di bawah ambang (< 0.30)"}
           </p>
         </div>
       </div>
@@ -172,7 +172,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
       <div className={`p-4 rounded-lg border ${interpretation.style}`}>
         <div className="flex flex-wrap items-center justify-between gap-1">
           <span className="font-bold text-sm">
-            Catatan NDVI: {interpretation.label}
+            Catatan NDVI sementara: {interpretation.label}
           </span>
           <span className="text-xs opacity-80">
             CNN: {data.classification} | NDVI:{" "}
@@ -186,11 +186,11 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
 
       {/* Perbandingan Visual: Thumbnail Cepat & Visual NDVI (Heatmap) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Foto Hasil Capture (Thumbnail Ringan dari Supabase) */}
+        {/* Foto asli kamera */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-800">
-              📷 Foto Hasil Capture (Preview)
+              📷 Foto Asli Kamera
             </p>
             {originalJpgUrl && (
               <a
@@ -200,17 +200,19 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
                 rel="noopener noreferrer"
                 className="text-xs font-medium text-blue-600 hover:text-blue-800 underline"
               >
-                ⬇️ Download JPG Asli (~3.4 MB)
+                ⬇️ Download JPG Asli
               </a>
             )}
           </div>
+          {!originalJpgUrl && <p className="text-xs text-gray-500">JPG asli tidak tersedia; menampilkan hasil preprocessing.</p>}
+          <a href={data.snapshotThumbnail} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 underline">Lihat JPG hasil preprocessing</a>
           <div className="relative aspect-square rounded-lg overflow-hidden border border-gray-200 bg-gray-100">
             <Image
-              src={data.snapshotThumbnail}
-              alt="Foto Hasil Capture MAPIR"
+              src={originalJpgUrl || data.snapshotThumbnail}
+              alt={originalJpgUrl ? "Foto Asli MAPIR" : "JPG Hasil Preprocessing"}
               fill
               unoptimized
-              className="object-cover"
+              className="object-contain"
             />
           </div>
         </div>
@@ -237,7 +239,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
               alt="Visual NDVI Heatmap"
               fill
               unoptimized
-              className="object-cover"
+              className="object-contain"
             />
           </div>
         </div>
@@ -253,7 +255,7 @@ export const PredictionCard: React.FC<PredictionCardProps> = ({
             rel="noopener noreferrer"
             className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 px-3 py-2 rounded-lg transition"
           >
-            📦 Unduh File Radiometrik RAW Asli (~18 MB)
+            📦 Unduh File RAW Asli
           </a>
         )}
       </div>

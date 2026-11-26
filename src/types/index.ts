@@ -1,6 +1,9 @@
 export interface NDVIPredictionResult {
   success: boolean;
-  filename: string;
+  filename?: string;
+  predictionId: string;
+  processedJpgPath: string;
+  ndviVisualPath: string;
   modelName: string;
   modelStatus: string;
   classification: "Sehat" | "Terserang";
@@ -16,13 +19,13 @@ export interface NDVIPredictionResult {
     red: number | null;
     nir: number | null;
   };
-  validPixelPercentage: number;
-  inputShape: number[];
+  validPixelPercentage: number | null;
+  inputShape?: number[];
   snapshotThumbnail: string;
   snapshotNDVI: string;
   radiometricMode: string;
   radiometricValidated: boolean;
-  physicalCoverageTargetMeters: number;
+  physicalCoverageTargetMeters: number | null;
   physicalCoverageValidated: boolean;
   automaticSprayingAllowed: boolean;
 }
@@ -35,4 +38,11 @@ export interface MapirHealthResponse {
     ip?: string;
   };
   capture_busy: boolean;
+}
+
+export interface StoredPredictionResult {
+  captureId: string;
+  originalJpgUrl: string | null;
+  originalRawUrl: string | null;
+  mlResult: NDVIPredictionResult;
 }
