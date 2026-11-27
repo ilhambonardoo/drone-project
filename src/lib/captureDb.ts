@@ -157,7 +157,8 @@ export function validateCaptureId(captureId: string): void {
   if (
     !captureId ||
     typeof captureId !== "string" ||
-    captureId.length > 128 || /[^A-Za-z0-9_-]/.test(captureId)
+    captureId.length > 128 ||
+    /[^A-Za-z0-9_-]/.test(captureId)
   ) {
     throw new Error(
       `captureId tidak valid: "${captureId}". Harus berupa string non-kosong dan hanya berisi karakter alfanumerik, dash (-), atau underscore (_).`,
@@ -206,9 +207,7 @@ export function parseSafeBytes(value: unknown): number | null {
  * Menjalankan query SELECT baik melalui dedicated PoolClient (jika diberikan)
  * atau melalui pool query umum (jika client bernilai undefined).
  */
-async function executeQuery<
-  T extends QueryResultRow = QueryResultRow,
->(
+async function executeQuery<T extends QueryResultRow = QueryResultRow>(
   client: PoolClient | undefined,
   text: string,
   params?: unknown[],
@@ -224,9 +223,7 @@ async function executeQuery<
  * Menjalankan query mutasi (UPDATE, DELETE, INSERT) dan mengembalikan objek QueryResult
  * agar pemanggil dapat memeriksa rowCount.
  */
-async function executeMutation<
-  T extends QueryResultRow = QueryResultRow,
->(
+async function executeMutation<T extends QueryResultRow = QueryResultRow>(
   client: PoolClient | undefined,
   text: string,
   params?: unknown[],
