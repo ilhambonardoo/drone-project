@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { insertCapture } from "@/src/lib/captureDb";
-import { query } from "@/src/lib/db";
+import { insertCapture, checkCaptureDatabase } from "@/src/lib/captureDb";
 import {
   ApiError,
   assertSameOrigin,
@@ -12,7 +11,7 @@ export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
     // Check database readiness before triggering a physical action.
-    await query("SELECT 1 FROM uji.captures LIMIT 1");
+    await checkCaptureDatabase();
     const data = await triggerCapture();
     try {
       await insertCapture({

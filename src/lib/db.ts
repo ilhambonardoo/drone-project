@@ -1,6 +1,6 @@
 /**
  * @file src/lib/db.ts
- * @description Singleton pg.Pool untuk koneksi PostgreSQL.
+ * @description Pool khusus advisory lock dan utilitas diagnostik (bukan CRUD aplikasi).
  *
  * PENTING: Modul ini hanya boleh digunakan di sisi server (Route Handler,
  * Server Component, script Node.js). Tidak boleh diimpor di Client Component.

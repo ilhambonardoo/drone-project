@@ -1,3 +1,5 @@
+> **Update Prisma ORM:** panduan database saat ini ada di [PRISMA-MIGRATION.md](PRISMA-MIGRATION.md). Bagian arsitektur lama di bawah dapat mengandung referensi Supabase/flow lama.
+
 # Drone Camera — Dashboard Analisis Citra MAPIR
 
 Dashboard Next.js untuk memperoleh citra dari kamera multispektral MAPIR Survey3 melalui API DreamPalm, menjalankan inferensi NDVI/CNN melalui FastAPI, lalu menampilkan hasil klasifikasi, nilai NDVI, kanal spektral, dan citra hasil.
