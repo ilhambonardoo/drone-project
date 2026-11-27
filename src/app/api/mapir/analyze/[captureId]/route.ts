@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import {
-  getClient,
+  fillCaptureMetadata,
   getCaptureById,
   getPredictionByCaptureId,
   insertCapture,
@@ -9,6 +9,7 @@ import {
   updateCaptureStored,
 } from "@/src/lib/captureDb";
 import type { PoolClient } from "pg";
+import { getClient } from "@/src/lib/db";
 import {
   assertCaptureId,
   CaptureStorageError,
@@ -57,8 +58,8 @@ export async function POST(
         "ANALYSIS_BUSY",
         "Capture ini sedang dianalisis. Coba lagi setelah proses selesai.",
       );
-    let capture = await getCaptureById(captureId, client);
-    const existing = await getPredictionByCaptureId(client, captureId);
+    let capture = await getCaptureById(captureId);
+    const existing = await getPredictionByCaptureId(captureId);
     if (existing && capture)
       return NextResponse.json(predictionResult(existing, capture));
     let files;
@@ -88,20 +89,15 @@ export async function POST(
             captureId,
             "failed",
             "Capture kamera gagal.",
-            client,
           );
         throw new ApiError(422, "CAPTURE_FAILED", "Capture kamera gagal.");
       }
       if (status.status !== "completed")
         throw new ApiError(422, "CAPTURE_PENDING", "Capture belum selesai.");
       if (!capture)
-        await insertCapture({ captureId, ...captureMetadata(status) }, client);
+        await insertCapture({ captureId, ...captureMetadata(status) });
       else {
-        const metadata = captureMetadata(status);
-        await client.query(
-          "UPDATE uji.captures SET drone_id = COALESCE(drone_id, $2), captured_at = COALESCE(captured_at, $3) WHERE capture_id = $1",
-          [captureId, metadata.droneId, metadata.capturedAt],
-        );
+        await fillCaptureMetadata(captureId, captureMetadata(status));
       }
       const { base, key } = cameraConfig();
       try {
@@ -124,7 +120,6 @@ export async function POST(
           captureId,
           pending ? "pending" : "failed",
           pending ? "RAW belum tersedia." : "Pengunduhan file asli gagal.",
-          client,
         );
         throw new ApiError(
           pending ? 422 : 502,
@@ -134,9 +129,9 @@ export async function POST(
             : "Penyimpanan JPG/RAW gagal. Coba lagi dengan capture ID yang sama.",
         );
       }
-      await updateCaptureStored({ captureId, ...files }, client);
+      await updateCaptureStored({ captureId, ...files });
     }
-    capture = await getCaptureById(captureId, client);
+    capture = await getCaptureById(captureId);
     if (!capture || capture.status !== "stored")
       throw new ApiError(
         500,
@@ -145,7 +140,7 @@ export async function POST(
       );
     const prediction = await processSnapshot(captureId, files.originalJpgPath);
     try {
-      await insertPrediction(client, prediction);
+      await insertPrediction(prediction);
     } catch {
       throw new ApiError(
         500,
@@ -153,7 +148,7 @@ export async function POST(
         "Hasil analisis belum tercatat. File asli dipertahankan. Periksa database sebelum retry.",
       );
     }
-    const saved = await getPredictionByCaptureId(client, captureId);
+    const saved = await getPredictionByCaptureId(captureId);
     if (!saved)
       throw new ApiError(
         500,

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
-import { query } from "@/src/lib/db";
+import { mediaExists } from "@/src/lib/captureDb";
 import { parseMediaPath, resolveMediaFile } from "@/src/lib/mediaUrl";
 
 // Access control for ALL routes is required at Nginx before deployment. Bind Next to loopback only.
@@ -20,17 +20,7 @@ export async function GET(
     );
   }
   try {
-    const rows =
-      info.group === "captures"
-        ? await query(
-            "SELECT capture_id FROM uji.captures WHERE capture_id = $1 AND status = $2 AND (original_jpg_path = $3 OR raw_file_path = $3)",
-            [info.id, "stored", relative],
-          )
-        : await query(
-            "SELECT prediction_id FROM uji.predictions WHERE prediction_id = $1 AND (processed_jpg_path = $2 OR ndvi_visual_path = $2)",
-            [info.id, relative],
-          );
-    if (!rows.length)
+    if (!(await mediaExists(info.group, info.id, relative)))
       return NextResponse.json(
         { detail: "Media tidak ditemukan." },
         { status: 404 },

@@ -1,25 +1,8 @@
-/**
- * @file src/lib/captureDb.ts
- * @description Data-Access Layer (DAL) untuk tabel uji.captures dan uji.predictions.
- *
- * Ketentuan:
- * - Semua query menyebut schema uji secara eksplisit.
- * - Semua nilai dinamis menggunakan parameterisasi SQL ($1, $2, ...).
- * - Fungsi yang beroperasi di bawah advisory lock menerima PoolClient
- *   agar tidak mengambil koneksi baru dari pool.
- * - Tabel uji.predictions bersifat append-only (INSERT saja, tidak ada UPDATE/DELETE).
- * - Tidak ada nilai yang dikarang: drone_id, captured_at, preprocessing_version,
- *   model_sha256, dan config_sha256 boleh NULL jika tidak tersedia.
- * - Validasi runtime ketat sebelum query dijalankan.
- * - Pengecekan rowCount untuk memastikan operasi UPDATE benar-benar mengubah data.
- */
+/** ORM data access. Preserve snake_case records for existing API contracts. */
+import type { Capture, Prediction, PrismaClient } from "@prisma/client";
+import { getPrisma } from "./prisma";
 
-import type { PoolClient, QueryResult, QueryResultRow } from "pg";
-import { query, execute, getClient, closePool } from "./db";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Tipe Data
-// ─────────────────────────────────────────────────────────────────────────────
+export type OrmDb = Pick<PrismaClient, "capture" | "prediction">;
 
 /** Record lengkap dari tabel uji.captures. */
 export interface CaptureRecord {
@@ -182,6 +165,10 @@ export function parseSafeBytes(value: unknown): number | null {
     return value;
   }
 
+  if (typeof value === "bigint") {
+    return parseSafeBytes(value.toString());
+  }
+
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!/^\d+$/.test(trimmed)) {
@@ -199,10 +186,9 @@ export function parseSafeBytes(value: unknown): number | null {
   throw new Error(`Tipe data ukuran bytes tidak dikenali: ${typeof value}`);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fungsi Pembantu Eksekusi Query
-// ─────────────────────────────────────────────────────────────────────────────
-
+function captureRecord(row: Capture): CaptureRecord {
+  if (row.status !== "pending" && row.status !== "stored" && row.status !== "failed") {
+    throw new Error("Status capture database tidak valid.");
 /**
  * Menjalankan query SELECT baik melalui dedicated PoolClient (jika diberikan)
  * atau melalui pool query umum (jika client bernilai undefined).
@@ -216,13 +202,16 @@ async function executeQuery<T extends QueryResultRow = QueryResultRow>(
     const res = await client.query<T>(text, params);
     return res.rows;
   }
-  return query<T>(text, params);
+  return { ...row, status: row.status,
+    jpg_size_bytes: parseSafeBytes(row.jpg_size_bytes),
+    raw_size_bytes: parseSafeBytes(row.raw_size_bytes) };
 }
+    
+function predictionRecord(row: Prediction): PredictionRecord {
+  if ((row.classification !== "Sehat" && row.classification !== "Terserang") ||
+      (row.class_index !== 0 && row.class_index !== 1)) {
+    throw new Error("Klasifikasi database tidak valid.");
 
-/**
- * Menjalankan query mutasi (UPDATE, DELETE, INSERT) dan mengembalikan objek QueryResult
- * agar pemanggil dapat memeriksa rowCount.
- */
 async function executeMutation<T extends QueryResultRow = QueryResultRow>(
   client: PoolClient | undefined,
   text: string,
@@ -231,107 +220,41 @@ async function executeMutation<T extends QueryResultRow = QueryResultRow>(
   if (client) {
     return client.query<T>(text, params);
   }
-  return execute<T>(text, params);
+  return { ...row, classification: row.classification, class_index: row.class_index };
+}
+const orm = (db?: OrmDb): OrmDb => db ?? getPrisma();
+
+export async function checkCaptureDatabase(db?: OrmDb): Promise<void> {
+  await orm(db).capture.findFirst({ select: { capture_id: true } });
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fungsi DAL
-// ─────────────────────────────────────────────────────────────────────────────
+export async function insertCapture(input: InsertCaptureInput, db?: OrmDb): Promise<void> {
+  validateCaptureId(input.captureId);
+  // createMany(skipDuplicates) preserves existing ON CONFLICT DO NOTHING semantics.
+  await orm(db).capture.createMany({ data: [{ capture_id: input.captureId,
+    drone_id: input.droneId ?? null, captured_at: input.capturedAt ?? null, status: "pending" }], skipDuplicates: true });
+}
 
-/**
- * Menyisipkan record capture baru ke uji.captures.
- *
- * Bersifat idempoten: ON CONFLICT (capture_id) DO NOTHING karena capture_id
- * adalah PRIMARY KEY. Pemanggilan kedua untuk capture_id yang sama diabaikan
- * secara aman.
- *
- * @param input  - Data capture dari Capture API.
- * @param client - Opsional dedicated PoolClient (misalnya di bawah advisory lock).
- */
-export async function insertCapture(
-  input: InsertCaptureInput,
-  client?: PoolClient,
-): Promise<void> {
-  const { captureId, droneId = null, capturedAt = null } = input;
+export async function getCaptureById(captureId: string, db?: OrmDb): Promise<CaptureRecord | null> {
   validateCaptureId(captureId);
-
-  await executeQuery(
-    client,
-    `INSERT INTO uji.captures (capture_id, drone_id, captured_at, status)
-     VALUES ($1, $2, $3, 'pending')
-     ON CONFLICT (capture_id) DO NOTHING`,
-    [captureId, droneId, capturedAt],
-  );
+  const row = await orm(db).capture.findUnique({ where: { capture_id: captureId } });
+  return row ? captureRecord(row) : null;
 }
 
-/**
- * Mengambil satu record capture berdasarkan capture_id.
- *
- * @param captureId - ID capture dari Capture API.
- * @param client    - Opsional dedicated PoolClient.
- * @returns CaptureRecord jika ditemukan, null jika tidak ada.
- */
-export async function getCaptureById(
-  captureId: string,
-  client?: PoolClient,
-): Promise<CaptureRecord | null> {
+/** Fill only missing metadata, never overwrite existing values (former COALESCE). */
+export async function fillCaptureMetadata(captureId: string, metadata: Omit<InsertCaptureInput, "captureId">, db?: OrmDb): Promise<void> {
   validateCaptureId(captureId);
-
-  const rows = await executeQuery<CaptureRecord>(
-    client,
-    `SELECT
-       capture_id,
-       drone_id,
-       created_at,
-       captured_at,
-       raw_file_path,
-       original_jpg_path,
-       raw_size_bytes,
-       jpg_size_bytes,
-       status,
-       error_message
-     FROM uji.captures
-     WHERE capture_id = $1`,
-    [captureId],
-  );
-
-  const row = rows[0];
-  if (!row) return null;
-
-  return {
-    ...row,
-    jpg_size_bytes: parseSafeBytes(row.jpg_size_bytes),
-    raw_size_bytes: parseSafeBytes(row.raw_size_bytes),
-  };
+  const client = orm(db);
+  if (metadata.droneId != null) await client.capture.updateMany({
+    where: { capture_id: captureId, drone_id: null }, data: { drone_id: metadata.droneId },
+  });
+  if (metadata.capturedAt != null) await client.capture.updateMany({
+    where: { capture_id: captureId, captured_at: null }, data: { captured_at: metadata.capturedAt },
+  });
 }
 
-/**
- * Memperbarui status capture menjadi 'stored' beserta path dan ukuran
- * kedua file asli (JPG dan RAW).
- *
- * Ketentuan Validasi Runtime:
- * - captureId harus valid.
- * - originalJpgPath dan rawFilePath tidak boleh kosong atau null.
- * - Path harus relatif dan tepat mengikuti pola:
- *   captures/<captureId>/original.jpg dan captures/<captureId>/original.raw
- * - jpgSizeBytes dan rawSizeBytes harus merupakan bilangan bulat positif yang memenuhi Number.isSafeInteger().
- * - Memeriksa rowCount hasil query; jika rowCount == 0, melempar error.
- *
- * @param input  - Path, ukuran file JPG dan RAW, serta capture_id.
- * @param client - Opsional dedicated PoolClient.
- */
-export async function updateCaptureStored(
-  input: UpdateCaptureStoredInput,
-  client?: PoolClient,
-): Promise<void> {
-  const {
-    captureId,
-    originalJpgPath,
-    rawFilePath,
-    jpgSizeBytes,
-    rawSizeBytes,
-  } = input;
-
+export async function updateCaptureStored(input: UpdateCaptureStoredInput, db?: OrmDb): Promise<void> {
+  const { captureId, originalJpgPath, rawFilePath, jpgSizeBytes, rawSizeBytes } = input;
   // 1. Validasi captureId
   validateCaptureId(captureId);
 
@@ -372,269 +295,74 @@ export async function updateCaptureStored(
     );
   }
 
-  // 4. Eksekusi query mutasi
-  const result = await executeMutation(
-    client,
-    `UPDATE uji.captures
-     SET status            = 'stored',
-         original_jpg_path = $2,
-         raw_file_path     = $3,
-         jpg_size_bytes    = $4,
-         raw_size_bytes    = $5,
-         error_message     = NULL
-     WHERE capture_id = $1`,
-    [captureId, originalJpgPath, rawFilePath, jpgSizeBytes, rawSizeBytes],
-  );
 
-  // 5. Pengecekan rowCount: pastikan ada baris yang diperbarui
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      `Record capture dengan ID "${captureId}" tidak ditemukan untuk diperbarui.`,
-    );
-  }
+  const result = await orm(db).capture.updateMany({ where: { capture_id: captureId }, data: {
+    status: "stored", original_jpg_path: originalJpgPath, raw_file_path: rawFilePath,
+    jpg_size_bytes: BigInt(jpgSizeBytes), raw_size_bytes: BigInt(rawSizeBytes), error_message: null,
+  } });
+  if (!result.count) throw new Error(`Record capture dengan ID "${captureId}" tidak ditemukan untuk diperbarui.`);
 }
 
-/**
- * Memperbarui status dan pesan error capture.
- * Hanya menerima status 'pending' atau 'failed'.
- * Jangan gunakan untuk 'stored' — gunakan updateCaptureStored.
- *
- * @param captureId    - ID capture.
- * @param status       - Status baru: 'pending' atau 'failed'.
- * @param errorMessage - Pesan error opsional (NULL jika tidak ada).
- * @param client       - Opsional dedicated PoolClient.
- */
-export async function updateCaptureStatus(
-  captureId: string,
-  status: "pending" | "failed",
-  errorMessage?: string | null,
-  client?: PoolClient,
-): Promise<void> {
+export async function updateCaptureStatus(captureId: string, status: "pending" | "failed", errorMessage?: string | null, db?: OrmDb): Promise<void> {
   validateCaptureId(captureId);
-
-  if (status !== "pending" && status !== "failed") {
-    throw new Error(
-      `Status tidak valid: "${status}". updateCaptureStatus hanya menerima "pending" atau "failed". Gunakan updateCaptureStored untuk status "stored".`,
-    );
-  }
-
-  const result = await executeMutation(
-    client,
-    `UPDATE uji.captures
-     SET status        = $2,
-         error_message = $3
-     WHERE capture_id = $1`,
-    [captureId, status, errorMessage ?? null],
-  );
-
-  if (!result.rowCount || result.rowCount === 0) {
-    throw new Error(
-      `Record capture dengan ID "${captureId}" tidak ditemukan untuk diperbarui.`,
-    );
-  }
+  if (status !== "pending" && status !== "failed") throw new Error("Status tidak valid.");
+  const result = await orm(db).capture.updateMany({ where: { capture_id: captureId }, data: { status, error_message: errorMessage ?? null } });
+  if (!result.count) throw new Error(`Record capture dengan ID "${captureId}" tidak ditemukan untuk diperbarui.`);
 }
 
-/**
- * Mencari prediksi terakhir untuk capture_id tertentu.
- *
- * Menerima PoolClient agar dapat dijalankan dalam konteks advisory lock
- * yang sama pada Tahap 5 (endpoint analyze).
- *
- * @param client    - PoolClient aktif (di bawah advisory lock).
- * @param captureId - ID capture yang dicari.
- * @returns PredictionRecord terbaru jika ada, null jika belum pernah diproses.
- */
-export async function getPredictionByCaptureId(
-  client: PoolClient,
-  captureId: string,
-): Promise<PredictionRecord | null> {
+export async function getPredictionByCaptureId(captureId: string, db?: OrmDb): Promise<PredictionRecord | null> {
   validateCaptureId(captureId);
-
-  const result = await client.query<PredictionRecord>(
-    `SELECT
-       prediction_id,
-       capture_id,
-       created_at,
-       processed_jpg_path,
-       ndvi_visual_path,
-       classification,
-       class_index,
-       prediction_score,
-       score_terserang,
-       score_sehat,
-       threshold,
-       ndvi,
-       green_mean_scaled,
-       red_mean_scaled,
-       nir_mean_scaled,
-       model_name,
-       model_status,
-       score_calibrated,
-       radiometric_mode,
-       radiometric_validated,
-       physical_coverage_target_m,
-       physical_coverage_validated,
-       valid_pixel_percentage,
-       automatic_spraying_allowed,
-       preprocessing_version,
-       model_sha256,
-       config_sha256
-     FROM uji.predictions
-     WHERE capture_id = $1
-     ORDER BY created_at DESC, prediction_id DESC
-     LIMIT 1`,
-    [captureId],
-  );
-
-  return result.rows[0] ?? null;
+  const row = await orm(db).prediction.findFirst({ where: { capture_id: captureId }, orderBy: [{ created_at: "desc" }, { prediction_id: "desc" }] });
+  return row ? predictionRecord(row) : null;
 }
 
-/**
- * Menyisipkan hasil prediksi baru ke uji.predictions.
- *
- * Tabel ini bersifat append-only: tidak ada UPDATE atau ON CONFLICT.
- * Pencegahan duplikasi dilakukan melalui advisory lock pada endpoint analyze.
- *
- * @param client - PoolClient aktif (di bawah advisory lock).
- * @param input  - Data hasil prediksi FastAPI yang sudah dipetakan.
- */
-export async function insertPrediction(
-  client: PoolClient,
-  input: InsertPredictionInput,
-): Promise<void> {
+/** Append-only, caller must hold the existing per-capture advisory lock. */
+export async function insertPrediction(input: InsertPredictionInput, db?: OrmDb): Promise<void> {
   validateCaptureId(input.captureId);
-
-  await client.query(
-    `INSERT INTO uji.predictions (
-       prediction_id,
-       capture_id,
-       processed_jpg_path,
-       ndvi_visual_path,
-       classification,
-       class_index,
-       prediction_score,
-       score_terserang,
-       score_sehat,
-       threshold,
-       ndvi,
-       green_mean_scaled,
-       red_mean_scaled,
-       nir_mean_scaled,
-       model_name,
-       model_status,
-       score_calibrated,
-       radiometric_mode,
-       radiometric_validated,
-       physical_coverage_target_m,
-       physical_coverage_validated,
-       valid_pixel_percentage,
-       automatic_spraying_allowed,
-       preprocessing_version,
-       model_sha256,
-       config_sha256
-     ) VALUES (
-       $1,  $2,  $3,  $4,  $5,  $6,  $7,  $8,  $9,  $10,
-       $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
-       $21, $22, $23, $24, $25, $26
-     )`,
-    [
-      input.predictionId,
-      input.captureId,
-      input.processedJpgPath,
-      input.ndviVisualPath,
-      input.classification,
-      input.classIndex,
-      input.predictionScore,
-      input.scoreTerserang,
-      input.scoreSehat,
-      input.threshold,
-      input.ndvi,
-      input.greenMeanScaled,
-      input.redMeanScaled,
-      input.nirMeanScaled,
-      input.modelName,
-      input.modelStatus,
-      input.scoreCalibrated,
-      input.radiometricMode,
-      input.radiometricValidated,
-      input.physicalCoverageTargetM,
-      input.physicalCoverageValidated,
-      input.validPixelPercentage,
-      input.automaticSprayingAllowed,
-      input.preprocessingVersion,
-      input.modelSha256,
-      input.configSha256,
-    ],
-  );
+  await orm(db).prediction.create({ data: {
+      prediction_id: input.predictionId,
+      capture_id: input.captureId,
+      processed_jpg_path: input.processedJpgPath,
+      ndvi_visual_path: input.ndviVisualPath,
+      classification: input.classification,
+      class_index: input.classIndex,
+      prediction_score: input.predictionScore,
+      score_terserang: input.scoreTerserang,
+      score_sehat: input.scoreSehat,
+      threshold: input.threshold,
+      ndvi: input.ndvi,
+      green_mean_scaled: input.greenMeanScaled,
+      red_mean_scaled: input.redMeanScaled,
+      nir_mean_scaled: input.nirMeanScaled,
+      model_name: input.modelName,
+      model_status: input.modelStatus,
+      score_calibrated: input.scoreCalibrated,
+      radiometric_mode: input.radiometricMode,
+      radiometric_validated: input.radiometricValidated,
+      physical_coverage_target_m: input.physicalCoverageTargetM,
+      physical_coverage_validated: input.physicalCoverageValidated,
+      valid_pixel_percentage: input.validPixelPercentage,
+      automatic_spraying_allowed: input.automaticSprayingAllowed,
+      preprocessing_version: input.preprocessingVersion,
+      model_sha256: input.modelSha256,
+      config_sha256: input.configSha256,
+  } });
 }
 
-/**
- * Mengambil prediksi terbaru beserta metadata capture-nya (JOIN).
- * Digunakan oleh endpoint GET /api/predictions/latest untuk inisialisasi halaman.
- *
- * Urutan: p.created_at DESC, p.prediction_id DESC (tie-breaker UUID).
- *
- * @param client - Opsional dedicated PoolClient.
- * @returns LatestPredictionRow jika ada data, null jika tabel kosong.
- */
-export async function getLatestPrediction(
-  client?: PoolClient,
-): Promise<LatestPredictionRow | null> {
-  const rows = await executeQuery<LatestPredictionRow>(
-    client,
-    `SELECT
-       -- Kolom dari uji.predictions
-       p.prediction_id,
-       p.capture_id,
-       p.created_at,
-       p.processed_jpg_path,
-       p.ndvi_visual_path,
-       p.classification,
-       p.class_index,
-       p.prediction_score,
-       p.score_terserang,
-       p.score_sehat,
-       p.threshold,
-       p.ndvi,
-       p.green_mean_scaled,
-       p.red_mean_scaled,
-       p.nir_mean_scaled,
-       p.model_name,
-       p.model_status,
-       p.score_calibrated,
-       p.radiometric_mode,
-       p.radiometric_validated,
-       p.physical_coverage_target_m,
-       p.physical_coverage_validated,
-       p.valid_pixel_percentage,
-       p.automatic_spraying_allowed,
-       p.preprocessing_version,
-       p.model_sha256,
-       p.config_sha256,
-       -- Kolom dari uji.captures (alias eksplisit untuk menghindari konflik)
-       c.created_at      AS capture_created_at,
-       c.drone_id,
-       c.captured_at,
-       c.original_jpg_path,
-       c.raw_file_path,
-       c.jpg_size_bytes,
-       c.raw_size_bytes,
-       c.status          AS capture_status
-     FROM uji.predictions p
-     JOIN uji.captures c USING (capture_id)
-     ORDER BY p.created_at DESC, p.prediction_id DESC
-     LIMIT 1`,
-  );
-
-  const row = rows[0];
+export async function getLatestPrediction(db?: OrmDb): Promise<LatestPredictionRow | null> {
+  const row = await orm(db).prediction.findFirst({ include: { capture: true }, orderBy: [{ created_at: "desc" }, { prediction_id: "desc" }] });
   if (!row) return null;
-
-  return {
-    ...row,
-    jpg_size_bytes: parseSafeBytes(row.jpg_size_bytes),
-    raw_size_bytes: parseSafeBytes(row.raw_size_bytes),
-  };
+  const { capture, ...prediction } = row;
+  const c = captureRecord(capture);
+  return { ...predictionRecord(prediction), capture_created_at: c.created_at, drone_id: c.drone_id,
+    captured_at: c.captured_at, original_jpg_path: c.original_jpg_path, raw_file_path: c.raw_file_path,
+    jpg_size_bytes: c.jpg_size_bytes, raw_size_bytes: c.raw_size_bytes, capture_status: c.status };
 }
 
-// Re-export getClient dan closePool agar pemanggil dapat menggunakannya
-export { getClient, closePool };
+export async function mediaExists(group: "captures" | "predictions", id: string, relative: string, db?: OrmDb): Promise<boolean> {
+  const client = orm(db);
+  if (group === "captures") return Boolean(await client.capture.findFirst({ where: { capture_id: id,
+    status: "stored", OR: [{ original_jpg_path: relative }, { raw_file_path: relative }] }, select: { capture_id: true } }));
+  return Boolean(await client.prediction.findFirst({ where: { prediction_id: id,
+    OR: [{ processed_jpg_path: relative }, { ndvi_visual_path: relative }] }, select: { prediction_id: true } }));
+}
