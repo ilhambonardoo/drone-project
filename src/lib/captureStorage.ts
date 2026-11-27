@@ -5,6 +5,9 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
+import { assertCaptureId } from "../validators/captureValidator";
+
+export { assertCaptureId };
 
 export type CaptureFiles = {
   originalJpgPath: string;
@@ -29,15 +32,6 @@ export class CaptureStorageError extends Error {
     | "DOWNLOAD_FAILED"
     | "INVALID_FILE"
     | "STORAGE_FAILED";
-}
-export function assertCaptureId(id: string): void {
-  if (
-    typeof id !== "string" ||
-    id.length === 0 ||
-    id.length > 128 ||
-    /[^A-Za-z0-9_-]/.test(id)
-  )
-    throw new Error("Capture ID tidak valid.");
 }
 export function storageRoot(): string {
   const root = process.env.DREAMPALM_STORAGE_ROOT;

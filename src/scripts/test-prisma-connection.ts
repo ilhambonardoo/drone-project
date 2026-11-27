@@ -1,5 +1,5 @@
 import { getPrisma, disconnectPrisma } from "../lib/prisma";
-import { getLatestPrediction } from "../lib/captureDb";
+import { getLatestPrediction } from "../repositories/predictionRepository";
 
 async function main() {
   try {

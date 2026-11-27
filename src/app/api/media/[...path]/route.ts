@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
-import { mediaExists } from "@/src/lib/captureDb";
 import { parseMediaPath, resolveMediaFile } from "@/src/lib/mediaUrl";
+import { canAccessMedia } from "@/src/services/mediaService";
 
 // Access control for ALL routes is required at Nginx before deployment. Bind Next to loopback only.
 export async function GET(
@@ -20,7 +20,7 @@ export async function GET(
     );
   }
   try {
-    if (!(await mediaExists(info.group, info.id, relative)))
+    if (!(await canAccessMedia(info.group, info.id, relative)))
       return NextResponse.json(
         { detail: "Media tidak ditemukan." },
         { status: 404 },

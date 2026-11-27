@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { getPrisma, disconnectPrisma } from "../lib/prisma";
 import { getClient, closePool } from "../lib/db";
 import { insertCapture, getCaptureById, updateCaptureStored, getLatestPrediction,
-  getPredictionByCaptureId, insertPrediction, mediaExists } from "../lib/captureDb";
+  getPredictionByCaptureId, insertPrediction } from "../repositories";
+import { mediaExists } from "../repositories/mediaRepository";
 
 const url = process.env.DATABASE_URL;
 if (!url || new URL(url).pathname !== "/dreampalm_prisma_test") {

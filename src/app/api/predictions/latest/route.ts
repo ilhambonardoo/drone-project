@@ -1,13 +1,11 @@
 import { NextResponse, connection } from "next/server";
-import { getLatestPrediction } from "@/src/lib/captureDb";
-import { latestResult } from "@/src/lib/predictionResult";
+import { getLatestPredictionResult } from "@/src/services/predictionService";
 
 export async function GET() {
   await connection();
   try {
-    const row = await getLatestPrediction();
     return NextResponse.json(
-      { result: row ? latestResult(row) : null },
+      { result: await getLatestPredictionResult() },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

@@ -1,24 +1,15 @@
 import { NextResponse } from "next/server";
-import { insertCapture, checkCaptureDatabase } from "@/src/lib/captureDb";
 import {
   ApiError,
   assertSameOrigin,
-  captureMetadata,
-  triggerCapture,
 } from "@/src/lib/mapirClient";
+import { triggerAndRecordCapture } from "@/src/services/captureService";
 
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    // Check database readiness before triggering a physical action.
-    await checkCaptureDatabase();
-    const data = await triggerCapture();
-    try {
-      await insertCapture({
-        captureId: data.capture_id,
-        ...captureMetadata(data),
-      });
-    } catch {
+    const data = await triggerAndRecordCapture();
+    if (data.dbError) {
       return NextResponse.json(
         {
           capture_id: data.capture_id,
@@ -32,7 +23,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       capture_id: data.capture_id,
-      status: data.status || "pending",
+      status: data.status,
     });
   } catch (e) {
     if (e instanceof ApiError)
