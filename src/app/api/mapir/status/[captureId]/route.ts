@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { assertCaptureId } from "@/src/lib/captureStorage";
 import { ApiError, getCameraStatus } from "@/src/lib/mapirClient";
+import { validateCaptureId } from "@/src/validators/captureValidator";
 
 export async function GET(
   _request: Request,
@@ -8,7 +8,7 @@ export async function GET(
 ) {
   const { captureId } = await params;
   try {
-    assertCaptureId(captureId);
+    validateCaptureId(captureId);
   } catch {
     return NextResponse.json(
       { detail: "Capture ID tidak valid." },

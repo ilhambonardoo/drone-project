@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import type { InsertPredictionInput } from "./captureDb";
+import type { InsertPredictionInput } from "../models";
 import { resolveMediaFile, UUID_V4 } from "./mediaUrl";
 import { ApiError } from "./mapirClient";
 

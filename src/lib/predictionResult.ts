@@ -2,7 +2,7 @@ import type {
   CaptureRecord,
   PredictionRecord,
   LatestPredictionRow,
-} from "./captureDb";
+} from "../models";
 import type { StoredPredictionResult } from "../types";
 import { toMediaUrl } from "./mediaUrl";
 export function predictionResult(

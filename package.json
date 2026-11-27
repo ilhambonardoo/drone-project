@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types --test src/__tests__/lib/captureDb.test.ts src/__tests__/lib/db.test.ts src/__tests__/lib/captureStorage.test.ts src/__tests__/lib/integrationContract.test.ts",
+    "test": "node --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types --test src/__tests__/repositories/captureRepository.test.ts src/__tests__/lib/db.test.ts src/__tests__/lib/captureStorage.test.ts src/__tests__/lib/integrationContract.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:studio": "prisma studio",
