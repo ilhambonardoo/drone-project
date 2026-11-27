@@ -7,9 +7,19 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types --test src/__tests__/lib/captureDb.test.ts src/__tests__/lib/db.test.ts src/__tests__/lib/captureStorage.test.ts src/__tests__/lib/integrationContract.test.ts"
+    "test": "node --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types --test src/__tests__/lib/captureDb.test.ts src/__tests__/lib/db.test.ts src/__tests__/lib/captureStorage.test.ts src/__tests__/lib/integrationContract.test.ts",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "prebuild": "prisma generate",
+    "pretest": "prisma generate",
+    "db:check": "node --env-file=.env --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types src/scripts/test-prisma-connection.ts",
+    "db:smoke": "node --env-file=.env --loader ./src/__tests__/test-resolver.mjs --experimental-strip-types src/scripts/test-prisma-smoke.ts"
   },
   "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "dotenv": "^17.2.3",
     "next": "^16.4.6",
     "pg": "^8.23.1",
     "react": "^19.3.1",
@@ -23,7 +33,13 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
+    "prisma": "7.10.1",
     "tailwindcss": "^4",
     "typescript": "^5"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "effect": "3.22.1"
+    }
   }
 }

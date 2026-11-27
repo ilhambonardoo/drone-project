@@ -1,0 +1,61 @@
+// PostgreSQL 16 existing schema. CHECK constraints live in migration.sql.
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["uji"]
+}
+
+model Capture {
+  capture_id                     String @db.Text @id(map: "captures_pkey")
+  drone_id                       String? @db.Text
+  created_at                     DateTime @db.Timestamptz(6) @default(now())
+  captured_at                    DateTime? @db.Timestamptz(6)
+  raw_file_path                  String? @db.Text
+  original_jpg_path              String? @db.Text
+  raw_size_bytes                 BigInt?
+  jpg_size_bytes                 BigInt?
+  status                         String @db.Text @default("pending")
+  error_message                  String? @db.Text
+  predictions Prediction[]
+  @@index([created_at(sort: Desc)], map: "idx_captures_created_at")
+  @@map("captures")
+  @@schema("uji")
+}
+
+model Prediction {
+  prediction_id                  String @db.Uuid @id(map: "predictions_pkey")
+  capture_id                     String @db.Text
+  created_at                     DateTime @db.Timestamptz(6) @default(now())
+  processed_jpg_path             String @db.Text
+  ndvi_visual_path               String @db.Text
+  classification                 String @db.Text
+  class_index                    Int @db.SmallInt
+  prediction_score               Float @db.DoublePrecision
+  score_terserang                Float @db.DoublePrecision
+  score_sehat                    Float @db.DoublePrecision
+  threshold                      Float @db.DoublePrecision
+  ndvi                           Float? @db.DoublePrecision
+  green_mean_scaled              Float? @db.DoublePrecision
+  red_mean_scaled                Float? @db.DoublePrecision
+  nir_mean_scaled                Float? @db.DoublePrecision
+  model_name                     String @db.Text
+  model_status                   String @db.Text
+  score_calibrated               Boolean
+  radiometric_mode               String @db.Text
+  radiometric_validated          Boolean
+  physical_coverage_target_m     Float? @db.DoublePrecision
+  physical_coverage_validated    Boolean
+  valid_pixel_percentage         Float? @db.DoublePrecision
+  automatic_spraying_allowed     Boolean @default(false)
+  preprocessing_version          String? @db.Text
+  model_sha256                   String? @db.Text
+  config_sha256                  String? @db.Text
+  capture Capture @relation(fields: [capture_id], references: [capture_id], onDelete: Restrict, onUpdate: NoAction, map: "predictions_capture_id_fkey")
+  @@index([capture_id], map: "idx_predictions_capture_id")
+  @@index([created_at(sort: Desc)], map: "idx_predictions_created_at")
+  @@map("predictions")
+  @@schema("uji")
+}
