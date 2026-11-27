@@ -7,6 +7,7 @@ interface CameraPreviewProps {
   loading: boolean;
   statusText: string;
   isCameraReady: boolean;
+  captureBlocked?: boolean;
 }
 
 export const CameraPreview: React.FC<CameraPreviewProps> = ({
@@ -14,6 +15,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   loading,
   statusText,
   isCameraReady,
+  captureBlocked = false,
 }) => {
   const streamUrl =
     process.env.NEXT_PUBLIC_MAPIR_STREAM_URL ||
@@ -82,10 +84,10 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
           />
 
 
-          <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/50 text-[10px] font-semibold text-white/90 uppercase tracking-widest">
+          {isCameraReady && !loading && <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-black/50 text-[10px] font-semibold text-white/90 uppercase tracking-widest">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
             Live
-          </div>
+          </div>}
 
 
           {loading && (
@@ -119,7 +121,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         <button
           type="button"
           onClick={onTriggerCapture}
-          disabled={loading || !isCameraReady}
+          disabled={loading || !isCameraReady || captureBlocked}
           className="mt-4 w-full py-3 px-6 rounded-xl text-sm font-semibold text-white bg-[#6B8E23] hover:bg-[#5a7a1c] disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150 flex items-center justify-center gap-2 cursor-pointer"
         >
           {loading ? (
@@ -149,6 +151,11 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
           )}
         </button>
 
+        {captureBlocked && !loading && (
+          <p className="mt-2 text-center text-xs text-amber-700">
+            Selesaikan capture sebelumnya sebelum mengambil foto baru.
+          </p>
+        )}
         {!isCameraReady && !loading && (
           <p className="mt-2 text-center text-xs text-[#C8553D]">
             Kamera offline — periksa koneksi MAPIR.

@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { PredictionCard } from "@/src/components/PredictionCard";
 import { CameraPreview } from "@/src/components/CameraPreview";
-import { NDVIPredictionResult, MapirHealthResponse } from "@/src/types";
+import { NDVIPredictionResult, MapirHealthResponse, StoredPredictionResult } from "@/src/types";
 import { getErrorMessage } from "@/src/lib/errors";
-
 
 function DpLogo() {
   return (
@@ -67,7 +66,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [jpgUrl, setJpgUrl] = useState<string | null>(null);
 
-
   useEffect(() => {
     const checkHealth = async () => {
       if (loading) return;
@@ -89,60 +87,110 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [loading]);
 
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const active = useRef(false);
+  const version = useRef(0);
+
+  const applyResult = (data: StoredPredictionResult) => {
+    setResult(data.mlResult);
+    setJpgUrl(data.originalJpgUrl);
+    setRawUrl(data.originalRawUrl);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const startVersion = version.current;
+    const initialize = async () => {
+      try {
+        const pending = sessionStorage.getItem("dreampalm.pendingCaptureId");
+        if (!cancelled && startVersion === version.current && pending && /^[A-Za-z0-9_-]{1,128}$/.test(pending)) setPendingId(pending);
+      } catch { /* Storage may be disabled in the browser. */ }
+      try {
+        const res = await fetch("/api/predictions/latest", { cache: "no-store" });
+        const data = await res.json();
+        if (!cancelled && startVersion === version.current && res.ok && data.result) {
+          setResult(data.result.mlResult);
+          setJpgUrl(data.result.originalJpgUrl);
+          setRawUrl(data.result.originalRawUrl);
+        } else if (!cancelled && startVersion === version.current && !res.ok) {
+          setError("Prediksi terakhir belum dapat dimuat.");
+        }
+      } catch {
+        if (!cancelled && startVersion === version.current) setError("Prediksi terakhir belum dapat dimuat.");
+      }
+    };
+    void initialize();
+    return () => { cancelled = true; };
+  }, []);
+
+  const rememberCapture = (id: string | null) => {
+    setPendingId(id);
+    try {
+      if (id) sessionStorage.setItem("dreampalm.pendingCaptureId", id);
+      else sessionStorage.removeItem("dreampalm.pendingCaptureId");
+    } catch { /* In-memory state is still available. */ }
+  };
+
+  const analyze = async (id: string) => {
+    setStatusText("Menyimpan JPG & RAW, lalu menjalankan analisis CNN...");
+    const res = await fetch(`/api/mapir/analyze/${encodeURIComponent(id)}`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Analisis gagal. Gunakan capture ID yang sama.");
+    applyResult(data as StoredPredictionResult);
+    rememberCapture(null);
+  };
 
   const handleCaptureAndAnalyze = async () => {
+    if (active.current || pendingId) return;
+    active.current = true;
+    version.current++;
     setLoading(true);
     setError(null);
     setStatusText("Mengirim perintah trigger ke MAPIR...");
-
     try {
-      const triggerRes = await fetch("/api/mapir/capture", { method: "POST" });
-      const triggerData = await triggerRes.json();
-
-      if (!triggerRes.ok) {
-        const msg =
-          typeof triggerData.detail === "object"
-            ? triggerData.detail.message
-            : triggerData.detail;
-        throw new Error(msg || "Gagal memicu capture MAPIR.");
-      }
-
-      const captureId = triggerData.capture_id;
-      setStatusText(`Memotret (${captureId})...`);
-
-      let completed = false;
-      while (!completed) {
+      const res = await fetch("/api/mapir/capture", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Trigger gagal. Periksa kamera sebelum mengulang.");
+      const id = data.capture_id;
+      if (typeof id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(id)) throw new Error("Capture ID tidak valid. Periksa kamera sebelum mengulang.");
+      rememberCapture(id);
+      setStatusText(`Memotret (${id})...`);
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        const pollRes = await fetch(`/api/mapir/status/${captureId}`);
-        const pollData = await pollRes.json();
-
-        if (!pollRes.ok) {
-          throw new Error(pollData.detail || "Gagal memeriksa status capture.");
+        const poll = await fetch(`/api/mapir/status/${encodeURIComponent(id)}`, { cache: "no-store", signal: AbortSignal.timeout(25_000) });
+        const status = await poll.json();
+        if (!poll.ok) throw new Error(status.detail || "Gagal memeriksa status capture.");
+        if (status.status === "failed") {
+          rememberCapture(null);
+          throw new Error("Pengambilan gambar MAPIR gagal.");
         }
-
-        if (pollData.status === "failed") {
-          throw new Error("Proses pengambilan gambar di kamera MAPIR gagal.");
+        if (status.status === "completed") {
+          await analyze(id);
+          return;
         }
-
-        if (pollData.status === "completed") {
-          completed = true;
-          setStatusText("Capture selesai. Menyiapkan hasil analisis...");
-          setResult(pollData.mlResult);
-          setJpgUrl(pollData.originalJpgUrl || null);
-          setRawUrl(pollData.originalRawUrl || null);
-        } else {
-          setStatusText(`Status kamera: ${pollData.status}...`);
-        }
+        setStatusText(`Status kamera: ${status.status}...`);
       }
-    } catch (err: unknown) {
-      setError(
-        getErrorMessage(err, "Terjadi kesalahan saat proses capture & analisis.")
-      );
+      throw new Error("Polling mencapai batas waktu. Lanjutkan dengan capture ID yang sama.");
+    } catch (error: unknown) {
+      setError(getErrorMessage(error, "Proses capture & analisis gagal."));
     } finally {
+      active.current = false;
       setLoading(false);
       setStatusText("");
     }
+  };
+
+  const retryAnalysis = async () => {
+    if (!pendingId || active.current) return;
+    if (!window.confirm("Pastikan analisis sebelumnya tidak lagi berjalan. Lanjutkan menggunakan capture ID yang sama?")) return;
+    active.current = true;
+    version.current++;
+    setLoading(true);
+    setError(null);
+    try { await analyze(pendingId); }
+    catch (error: unknown) { setError(getErrorMessage(error, "Analisis belum berhasil.")); }
+    finally { active.current = false; setLoading(false); setStatusText(""); }
   };
 
   return (
@@ -218,8 +266,17 @@ export default function Home() {
           loading={loading}
           statusText={statusText}
           isCameraReady={isCameraReady}
+          captureBlocked={Boolean(pendingId)}
         />
 
+
+        {pendingId && !loading && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm space-y-3 text-center text-amber-900">
+            <p>Capture belum selesai dianalisis: <span className="font-mono break-all">{pendingId}</span></p>
+            <button type="button" onClick={retryAnalysis} className="px-4 py-2 bg-[#6B8E23] hover:bg-[#5a7a1c] text-white rounded-lg font-semibold">Lanjutkan Analisis</button>
+            <button type="button" onClick={() => { if (window.confirm("Berhenti melanjutkan capture ini di halaman? File dan metadata tidak akan dihapus.")) rememberCapture(null); }} className="block mx-auto underline text-gray-600">Lepas capture dari halaman</button>
+          </div>
+        )}
 
         {result ? (
           <PredictionCard
