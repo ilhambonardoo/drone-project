@@ -31,11 +31,13 @@ import type {
 import type { PoolClient, QueryResult } from "pg";
 
 /** Helper untuk membuat mock PoolClient dengan konfigurasi queryResult tertentu. */
-function createMockClient(options: {
-  rows?: unknown[];
-  rowCount?: number;
-  throwError?: Error;
-} = {}) {
+function createMockClient(
+  options: {
+    rows?: unknown[];
+    rowCount?: number;
+    throwError?: Error;
+  } = {},
+) {
   const { rows = [], rowCount = rows.length, throwError } = options;
   const calls: { text: string; params: unknown[] | undefined }[] = [];
   let released = false;
@@ -113,19 +115,19 @@ describe("captureDb - validateCaptureId", () => {
   });
 
   it("menolak captureId kosong atau string spasi", () => {
-    assert.throws(
-      () => validateCaptureId(""),
-      /captureId tidak valid/,
-    );
-    assert.throws(
-      () => validateCaptureId("   "),
-      /captureId tidak valid/,
-    );
+    assert.throws(() => validateCaptureId(""), /captureId tidak valid/);
+    assert.throws(() => validateCaptureId("   "), /captureId tidak valid/);
   });
 
   it("menolak captureId dengan karakter berbahaya atau path traversal", () => {
-    assert.throws(() => validateCaptureId("../etc/passwd"), /captureId tidak valid/);
-    assert.throws(() => validateCaptureId("CAP; DROP TABLE"), /captureId tidak valid/);
+    assert.throws(
+      () => validateCaptureId("../etc/passwd"),
+      /captureId tidak valid/,
+    );
+    assert.throws(
+      () => validateCaptureId("CAP; DROP TABLE"),
+      /captureId tidak valid/,
+    );
     assert.throws(() => validateCaptureId("cap/sub"), /captureId tidak valid/);
   });
 });
@@ -144,7 +146,10 @@ describe("captureDb - parseSafeBytes (Konversi BIGINT)", () => {
     assert.equal(parseSafeBytes(0), 0);
     assert.equal(parseSafeBytes(1024), 1024);
     assert.equal(parseSafeBytes(18_000_000), 18_000_000);
-    assert.equal(parseSafeBytes(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER);
+    assert.equal(
+      parseSafeBytes(Number.MAX_SAFE_INTEGER),
+      Number.MAX_SAFE_INTEGER,
+    );
   });
 
   it("mengonversi string angka dari PostgreSQL BIGINT menjadi safe integer number", () => {
@@ -162,7 +167,10 @@ describe("captureDb - parseSafeBytes (Konversi BIGINT)", () => {
     assert.throws(() => parseSafeBytes(NaN), /safe integer non-negatif/);
     assert.throws(() => parseSafeBytes(12.34), /safe integer non-negatif/);
     assert.throws(() => parseSafeBytes(Infinity), /safe integer non-negatif/);
-    assert.throws(() => parseSafeBytes("999999999999999999999999999"), /di luar rentang safe integer/);
+    assert.throws(
+      () => parseSafeBytes("999999999999999999999999999"),
+      /di luar rentang safe integer/,
+    );
     assert.throws(() => parseSafeBytes("abc"), /string tidak valid/);
   });
 });
@@ -184,8 +192,14 @@ describe("captureDb - insertCapture", () => {
 
     assert.equal(calls.length, 1);
     const call = calls[0];
-    assert.ok(call.text.includes("uji.captures"), "Harus menargetkan uji.captures");
-    assert.ok(!call.text.includes(FIXTURE_CAPTURE_ID), "Nilai dinamis tidak boleh di-hardcode");
+    assert.ok(
+      call.text.includes("uji.captures"),
+      "Harus menargetkan uji.captures",
+    );
+    assert.ok(
+      !call.text.includes(FIXTURE_CAPTURE_ID),
+      "Nilai dinamis tidak boleh di-hardcode",
+    );
     assert.deepEqual(call.params, [
       FIXTURE_CAPTURE_ID,
       "DRONE-01",
@@ -213,12 +227,9 @@ describe("captureDb - insertCapture", () => {
 
   it("menolak captureId tidak valid", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await insertCapture({ captureId: "" }, client);
-      },
-      /captureId tidak valid/,
-    );
+    await assert.rejects(async () => {
+      await insertCapture({ captureId: "" }, client);
+    }, /captureId tidak valid/);
   });
 });
 
@@ -295,117 +306,93 @@ describe("captureDb - updateCaptureStored", () => {
 
   it("menolak JPG path kosong atau null", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored(
-          { ...validBaseInput, originalJpgPath: "" },
-          client,
-        );
-      },
-      /originalJpgPath tidak valid/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        { ...validBaseInput, originalJpgPath: "" },
+        client,
+      );
+    }, /originalJpgPath tidak valid/);
   });
 
   it("menolak RAW path kosong atau null", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored(
-          { ...validBaseInput, rawFilePath: "" },
-          client,
-        );
-      },
-      /rawFilePath tidak valid/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored({ ...validBaseInput, rawFilePath: "" }, client);
+    }, /rawFilePath tidak valid/);
   });
 
   it("menolak path yang tidak sesuai dengan pola captureId", async () => {
     const { client } = createMockClient();
     // Path JPG mengarah ke captureId lain
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored(
-          {
-            ...validBaseInput,
-            originalJpgPath: "captures/OTHER-ID/original.jpg",
-          },
-          client,
-        );
-      },
-      /originalJpgPath tidak valid.*Harus bernilai/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        {
+          ...validBaseInput,
+          originalJpgPath: "captures/OTHER-ID/original.jpg",
+        },
+        client,
+      );
+    }, /originalJpgPath tidak valid.*Harus bernilai/);
 
     // Path RAW mengarah ke captureId lain
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored(
-          {
-            ...validBaseInput,
-            rawFilePath: "captures/OTHER-ID/original.raw",
-          },
-          client,
-        );
-      },
-      /rawFilePath tidak valid.*Harus bernilai/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        {
+          ...validBaseInput,
+          rawFilePath: "captures/OTHER-ID/original.raw",
+        },
+        client,
+      );
+    }, /rawFilePath tidak valid.*Harus bernilai/);
   });
 
   it("menolak ukuran file nol", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, jpgSizeBytes: 0 }, client);
-      },
-      /jpgSizeBytes harus merupakan bilangan bulat positif/,
-    );
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, rawSizeBytes: 0 }, client);
-      },
-      /rawSizeBytes harus merupakan bilangan bulat positif/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored({ ...validBaseInput, jpgSizeBytes: 0 }, client);
+    }, /jpgSizeBytes harus merupakan bilangan bulat positif/);
+    await assert.rejects(async () => {
+      await updateCaptureStored({ ...validBaseInput, rawSizeBytes: 0 }, client);
+    }, /rawSizeBytes harus merupakan bilangan bulat positif/);
   });
 
   it("menolak ukuran file negatif", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, jpgSizeBytes: -50 }, client);
-      },
-      /jpgSizeBytes harus merupakan bilangan bulat positif/,
-    );
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, rawSizeBytes: -1000 }, client);
-      },
-      /rawSizeBytes harus merupakan bilangan bulat positif/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        { ...validBaseInput, jpgSizeBytes: -50 },
+        client,
+      );
+    }, /jpgSizeBytes harus merupakan bilangan bulat positif/);
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        { ...validBaseInput, rawSizeBytes: -1000 },
+        client,
+      );
+    }, /rawSizeBytes harus merupakan bilangan bulat positif/);
   });
 
   it("menolak ukuran file NaN atau pecahan (bukan safe integer)", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, jpgSizeBytes: NaN }, client);
-      },
-      /jpgSizeBytes harus merupakan bilangan bulat positif/,
-    );
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored({ ...validBaseInput, rawSizeBytes: 123.456 }, client);
-      },
-      /rawSizeBytes harus merupakan bilangan bulat positif/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        { ...validBaseInput, jpgSizeBytes: NaN },
+        client,
+      );
+    }, /jpgSizeBytes harus merupakan bilangan bulat positif/);
+    await assert.rejects(async () => {
+      await updateCaptureStored(
+        { ...validBaseInput, rawSizeBytes: 123.456 },
+        client,
+      );
+    }, /rawSizeBytes harus merupakan bilangan bulat positif/);
   });
 
   it("melempar error jika rowCount = 0 (record capture tidak ditemukan)", async () => {
     const { client } = createMockClient({ rowCount: 0 });
-    await assert.rejects(
-      async () => {
-        await updateCaptureStored(validBaseInput, client);
-      },
-      /Record capture dengan ID.*tidak ditemukan untuk diperbarui/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStored(validBaseInput, client);
+    }, /Record capture dengan ID.*tidak ditemukan untuk diperbarui/);
   });
 });
 
@@ -416,7 +403,12 @@ describe("captureDb - updateCaptureStored", () => {
 describe("captureDb - updateCaptureStatus", () => {
   it("berhasil update status 'pending' dan 'failed'", async () => {
     const { client, calls } = createMockClient({ rowCount: 1 });
-    await updateCaptureStatus(FIXTURE_CAPTURE_ID, "failed", "Download error", client);
+    await updateCaptureStatus(
+      FIXTURE_CAPTURE_ID,
+      "failed",
+      "Download error",
+      client,
+    );
 
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].params, [
@@ -428,24 +420,18 @@ describe("captureDb - updateCaptureStatus", () => {
 
   it("menolak input status 'stored' (harus menggunakan updateCaptureStored)", async () => {
     const { client } = createMockClient();
-    await assert.rejects(
-      async () => {
-        // Casting ke any untuk menguji penolakan runtime
-        // @ts-expect-error Pengujian runtime penolakan status stored
-        await updateCaptureStatus(FIXTURE_CAPTURE_ID, "stored", null, client);
-      },
-      /Status tidak valid.*updateCaptureStatus hanya menerima "pending" atau "failed"/,
-    );
+    await assert.rejects(async () => {
+      // Casting ke any untuk menguji penolakan runtime
+      // @ts-expect-error Pengujian runtime penolakan status stored
+      await updateCaptureStatus(FIXTURE_CAPTURE_ID, "stored", null, client);
+    }, /Status tidak valid.*updateCaptureStatus hanya menerima "pending" atau "failed"/);
   });
 
   it("melempar error jika rowCount = 0", async () => {
     const { client } = createMockClient({ rowCount: 0 });
-    await assert.rejects(
-      async () => {
-        await updateCaptureStatus(FIXTURE_CAPTURE_ID, "failed", "Error", client);
-      },
-      /Record capture dengan ID.*tidak ditemukan untuk diperbarui/,
-    );
+    await assert.rejects(async () => {
+      await updateCaptureStatus(FIXTURE_CAPTURE_ID, "failed", "Error", client);
+    }, /Record capture dengan ID.*tidak ditemukan untuk diperbarui/);
   });
 });
 

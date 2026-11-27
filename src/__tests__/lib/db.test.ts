@@ -62,7 +62,8 @@ describe("db - lazy initialization & security", () => {
 
 describe("db - connection release & execution", () => {
   it("melepaskan koneksi (client.release) ketika query berhasil", async () => {
-    process.env.DATABASE_URL = "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
+    process.env.DATABASE_URL =
+      "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
     await closePool();
 
     const originalConnect = pg.Pool.prototype.connect;
@@ -81,7 +82,11 @@ describe("db - connection release & execution", () => {
     try {
       const rows = await query<{ val: number }>("SELECT 42 AS val");
       assert.deepEqual(rows, [{ val: 42 }]);
-      assert.equal(released, true, "client.release() harus dipanggil setelah query berhasil");
+      assert.equal(
+        released,
+        true,
+        "client.release() harus dipanggil setelah query berhasil",
+      );
     } finally {
       pg.Pool.prototype.connect = originalConnect;
       await closePool();
@@ -89,7 +94,8 @@ describe("db - connection release & execution", () => {
   });
 
   it("melepaskan koneksi (client.release) di dalam finally meskipun query melempar error", async () => {
-    process.env.DATABASE_URL = "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
+    process.env.DATABASE_URL =
+      "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
     await closePool();
 
     const originalConnect = pg.Pool.prototype.connect;
@@ -107,12 +113,9 @@ describe("db - connection release & execution", () => {
     }) as typeof pg.Pool.prototype.connect;
 
     try {
-      await assert.rejects(
-        async () => {
-          await query("INVALID QUERY");
-        },
-        /Syntax error in query/,
-      );
+      await assert.rejects(async () => {
+        await query("INVALID QUERY");
+      }, /Syntax error in query/);
       assert.equal(
         released,
         true,
@@ -125,7 +128,8 @@ describe("db - connection release & execution", () => {
   });
 
   it("execute mengembalikan QueryResult lengkap termasuk rowCount", async () => {
-    process.env.DATABASE_URL = "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
+    process.env.DATABASE_URL =
+      "postgresql://test_user:test_pass@127.0.0.1:5432/test_db";
     await closePool();
 
     const originalConnect = pg.Pool.prototype.connect;
@@ -147,7 +151,9 @@ describe("db - connection release & execution", () => {
     }) as typeof pg.Pool.prototype.connect;
 
     try {
-      const res = await execute("UPDATE uji.captures SET status = $1", ["pending"]);
+      const res = await execute("UPDATE uji.captures SET status = $1", [
+        "pending",
+      ]);
       assert.equal(res.rowCount, 3);
       assert.deepEqual(res.rows, []);
       assert.equal(released, true);
@@ -161,16 +167,24 @@ describe("db - connection release & execution", () => {
 describe("db - error logging credential sanitization", () => {
   it("handler error pool tidak membocorkan kredensial dan tidak membuka koneksi nyata", async () => {
     const previousUrl = process.env.DATABASE_URL;
-    process.env.DATABASE_URL = "postgresql://mock_user:mock_password@127.0.0.1:5432/mock_db";
+    process.env.DATABASE_URL =
+      "postgresql://mock_user:mock_password@127.0.0.1:5432/mock_db";
     await closePool();
     const logs: string[] = [];
     const originalConsoleError = console.error;
     const originalConnect = pg.Pool.prototype.connect;
-    console.error = (...args: unknown[]) => { logs.push(args.map(String).join(" ")); };
-    pg.Pool.prototype.connect = (async function (this: pg.Pool) {
-      this.emit("error", new Error("Failure: mock_password postgresql://mock_user:mock_password@127.0.0.1:5432/mock_db"));
+    console.error = (...args: unknown[]) => {
+      logs.push(args.map(String).join(" "));
+    };
+    pg.Pool.prototype.connect = async function (this: pg.Pool) {
+      this.emit(
+        "error",
+        new Error(
+          "Failure: mock_password postgresql://mock_user:mock_password@127.0.0.1:5432/mock_db",
+        ),
+      );
       return { release: () => {} } as unknown as pg.PoolClient;
-    }) as typeof pg.Pool.prototype.connect;
+    } as typeof pg.Pool.prototype.connect;
     try {
       const client = await getClient();
       client.release();
