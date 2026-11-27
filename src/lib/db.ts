@@ -34,7 +34,7 @@ function getPool(): pg.Pool {
   if (!connectionString) {
     throw new Error(
       "[db] Environment variable DATABASE_URL belum dikonfigurasi. " +
-      "Tambahkan DATABASE_URL ke file .env sebelum menggunakan database.",
+        "Tambahkan DATABASE_URL ke file .env sebelum menggunakan database.",
     );
   }
 
@@ -61,9 +61,10 @@ function getPool(): pg.Pool {
  * @param params - Array nilai parameter (opsional).
  * @returns QueryResult<T> lengkap.
  */
-export async function execute<
-  T extends QueryResultRow = QueryResultRow,
->(text: string, params?: unknown[]): Promise<QueryResult<T>> {
+export async function execute<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult<T>> {
   const client = await getPool().connect();
   try {
     return await client.query<T>(text, params);
@@ -86,9 +87,10 @@ export async function execute<
  *   ['pending']
  * );
  */
-export async function query<
-  T extends QueryResultRow = QueryResultRow,
->(text: string, params?: unknown[]): Promise<T[]> {
+export async function query<T extends QueryResultRow = QueryResultRow>(
+  text: string,
+  params?: unknown[],
+): Promise<T[]> {
   const result = await execute<T>(text, params);
   return result.rows;
 }

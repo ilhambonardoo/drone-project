@@ -4,6 +4,7 @@ import { assertCaptureId, storageRoot } from "./captureStorage";
 
 export const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 export function parseMediaPath(relativePath: string): {
   group: "captures" | "predictions";
   id: string;
@@ -29,6 +30,7 @@ export function toMediaUrl(relativePath: string): string {
   parseMediaPath(relativePath);
   return `/api/media/${relativePath}`;
 }
+
 /** Reject symlinks at every level below the configured root. Storage is private to the service user. */
 export async function resolveMediaFile(
   relativePath: string,

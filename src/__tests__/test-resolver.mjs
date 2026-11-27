@@ -7,7 +7,10 @@ export async function resolve(specifier, context, nextResolve) {
   try {
     return await nextResolve(specifier, context);
   } catch (err) {
-    if (err.code === "ERR_MODULE_NOT_FOUND" && (specifier.startsWith("./") || specifier.startsWith("../"))) {
+    if (
+      err.code === "ERR_MODULE_NOT_FOUND" &&
+      (specifier.startsWith("./") || specifier.startsWith("../"))
+    ) {
       const parentDir = path.dirname(fileURLToPath(context.parentURL));
       for (const ext of [".ts", ".js", "/index.ts", "/index.js"]) {
         const candidate = path.resolve(parentDir, specifier + ext);

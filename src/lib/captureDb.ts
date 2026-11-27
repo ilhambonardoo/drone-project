@@ -140,7 +140,8 @@ export function validateCaptureId(captureId: string): void {
   if (
     !captureId ||
     typeof captureId !== "string" ||
-    captureId.length > 128 || /[^A-Za-z0-9_-]/.test(captureId)
+    captureId.length > 128 ||
+    /[^A-Za-z0-9_-]/.test(captureId)
   ) {
     throw new Error(
       `captureId tidak valid: "${captureId}". Harus berupa string non-kosong dan hanya berisi karakter alfanumerik, dash (-), atau underscore (_).`,
@@ -185,19 +186,39 @@ export function parseSafeBytes(value: unknown): number | null {
   throw new Error(`Tipe data ukuran bytes tidak dikenali: ${typeof value}`);
 }
 
-
 function captureRecord(row: Capture): CaptureRecord {
   if (row.status !== "pending" && row.status !== "stored" && row.status !== "failed") {
     throw new Error("Status capture database tidak valid.");
+/**
+ * Menjalankan query SELECT baik melalui dedicated PoolClient (jika diberikan)
+ * atau melalui pool query umum (jika client bernilai undefined).
+ */
+async function executeQuery<T extends QueryResultRow = QueryResultRow>(
+  client: PoolClient | undefined,
+  text: string,
+  params?: unknown[],
+): Promise<T[]> {
+  if (client) {
+    const res = await client.query<T>(text, params);
+    return res.rows;
   }
   return { ...row, status: row.status,
     jpg_size_bytes: parseSafeBytes(row.jpg_size_bytes),
     raw_size_bytes: parseSafeBytes(row.raw_size_bytes) };
 }
+    
 function predictionRecord(row: Prediction): PredictionRecord {
   if ((row.classification !== "Sehat" && row.classification !== "Terserang") ||
       (row.class_index !== 0 && row.class_index !== 1)) {
     throw new Error("Klasifikasi database tidak valid.");
+
+async function executeMutation<T extends QueryResultRow = QueryResultRow>(
+  client: PoolClient | undefined,
+  text: string,
+  params?: unknown[],
+): Promise<QueryResult<T>> {
+  if (client) {
+    return client.query<T>(text, params);
   }
   return { ...row, classification: row.classification, class_index: row.class_index };
 }
